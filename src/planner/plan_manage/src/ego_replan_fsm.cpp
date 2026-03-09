@@ -638,28 +638,51 @@ namespace ego_planner
     }
   }
 
-  bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) // zx-todo
-  {
-    start_pt_ = odom_pos_;
-    start_vel_ = odom_vel_;
-    start_acc_.setZero();
+bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) // zx-todo
+{
+  // === DEBUGGING START ===
+  RCLCPP_INFO(node_->get_logger(), "=== START planFromGlobalTraj ===");
+  
+  // 1. Hole Referenz auf die globalen Daten
+  auto* global_data = &planner_manager_->global_data_;
 
-    bool flag_random_poly_init;
-    if (timesOfConsecutiveStateCalls().first == 1)
-      flag_random_poly_init = false;
-    else
-      flag_random_poly_init = true;
+  // 2. Logge die Daten, um zu sehen, ob sie existieren
+  RCLCPP_INFO(node_->get_logger(), "Global Duration: %.4f", global_data->global_duration_);
+  RCLCPP_INFO(node_->get_logger(), "Last Progress Time: %.4f", global_data->last_progress_time_);
 
-    for (int i = 0; i < trial_times; i++)
-    {
-      if (callReboundReplan(true, flag_random_poly_init))
-      {
-        return true;
-      }
-    }
-    return false;
+  // 3. CRITICAL CHECK: Hat der globale Pfad eine Länge?
+  if (global_data->global_duration_ < 0.1) {
+      RCLCPP_ERROR(node_->get_logger(), "CRITICAL FAILURE: Global Trajectory hat Dauer 0.0! A* hat keinen Pfad gefunden oder er ist ungültig.");
+      changeFSMExecState(WAIT_TARGET, "SAFETY_DUR"); 
+      return false;
   }
+  // === DEBUGGING ENDE ===
 
+  start_pt_ = odom_pos_;
+  start_vel_ = odom_vel_;
+  start_acc_.setZero();
+
+  bool flag_random_poly_init;
+  if (timesOfConsecutiveStateCalls().first == 1)
+    flag_random_poly_init = false;
+  else
+    flag_random_poly_init = true;
+
+  for (int i = 0; i < trial_times; i++)
+  {
+    RCLCPP_INFO(node_->get_logger(), "Versuche callReboundReplan (Versuch %d)...", i);
+    
+    // Hier passierte der Crash, weil er auf leere Daten zugegriffen hat
+    if (callReboundReplan(true, flag_random_poly_init))
+    {
+      RCLCPP_INFO(node_->get_logger(), "Erfolgreich geplant!");
+      return true;
+    }
+  }
+  
+  RCLCPP_ERROR(node_->get_logger(), "Alle Versuche fehlgeschlagen.");
+  return false;
+}
   bool EGOReplanFSM::planFromCurrentTraj(const int trial_times /*=1*/)
   {
 
@@ -920,21 +943,52 @@ namespace ego_planner
     return true;
   }
 
-  void EGOReplanFSM::getLocalTarget()
+ void EGOReplanFSM::getLocalTarget()
   {
-    double t;
+    // --- DEBUGGING START ---
+    RCLCPP_INFO(node_->get_logger(), "--- START getLocalTarget ---");
+    
+    // Werte prüfen, die den Crash verursachen könnten
+    double p_horizon = planning_horizen_;
+    double max_v = planner_manager_->pp_.max_vel_;
+    
+    RCLCPP_INFO(node_->get_logger(), "Planning Horizon: %f", p_horizon);
+    RCLCPP_INFO(node_->get_logger(), "Max Vel: %f", max_v);
 
-    double t_step = planning_horizen_ / 20 / planner_manager_->pp_.max_vel_;
+    // Schutz vor Division durch Null
+    if (max_v <= 0.001) {
+        RCLCPP_WARN(node_->get_logger(), "WARNUNG: Max Vel ist zu klein (%.4f). Setze auf 1.0", max_v);
+        max_v = 1.0;
+    }
+    
+    double t_step = p_horizon / 20 / max_v;
+    RCLCPP_INFO(node_->get_logger(), "Calculated t_step: %f", t_step);
+
+    // Schutz vor unsinnigen Schrittweiten
+    if (t_step <= 0.0001 || std::isnan(t_step) || std::isinf(t_step)) {
+        RCLCPP_WARN(node_->get_logger(), "WARNUNG: Ungueltiger t_step! Setze Default 0.1");
+        t_step = 0.1;
+    }
+    // --- DEBUGGING ENDE ---
+
+    double t;
     double dist_min = 9999, dist_min_t = 0.0;
-    for (t = planner_manager_->global_data_.last_progress_time_; t < planner_manager_->global_data_.global_duration_; t += t_step)
+    double duration = planner_manager_->global_data_.global_duration_;
+
+    // Startpunkt sicherstellen
+    double start_search_t = planner_manager_->global_data_.last_progress_time_;
+    
+    RCLCPP_INFO(node_->get_logger(), "Suche Target von t=%.2f bis t=%.2f", start_search_t, duration);
+
+    for (t = start_search_t; t < duration; t += t_step)
     {
       Eigen::Vector3d pos_t = planner_manager_->global_data_.getPosition(t);
       double dist = (pos_t - start_pt_).norm();
 
-      if (t < planner_manager_->global_data_.last_progress_time_ + 1e-5 && dist > planning_horizen_)
+      if (t < start_search_t + 1e-5 && dist > planning_horizen_)
       {
         // Important cornor case!
-        for (; t < planner_manager_->global_data_.global_duration_; t += t_step)
+        for (; t < duration; t += t_step)
         {
           Eigen::Vector3d pos_t_temp = planner_manager_->global_data_.getPosition(t);
           double dist_temp = (pos_t_temp - start_pt_).norm();
@@ -942,7 +996,7 @@ namespace ego_planner
           {
             pos_t = pos_t_temp;
             dist = (pos_t - start_pt_).norm();
-            cout << "Escape cornor case \"getLocalTarget\"" << endl;
+            // cout << "Escape cornor case \"getLocalTarget\"" << endl;
             break;
           }
         }
@@ -961,13 +1015,17 @@ namespace ego_planner
         break;
       }
     }
-    if (t > planner_manager_->global_data_.global_duration_) // Last global point
+
+    if (t > duration) // Last global point
     {
       local_target_pt_ = end_pt_;
-      planner_manager_->global_data_.last_progress_time_ = planner_manager_->global_data_.global_duration_;
+      planner_manager_->global_data_.last_progress_time_ = duration;
     }
 
-    if ((end_pt_ - local_target_pt_).norm() < (planner_manager_->pp_.max_vel_ * planner_manager_->pp_.max_vel_) / (2 * planner_manager_->pp_.max_acc_))
+    // Velocity Berechnung
+    double safe_max_v = (max_v > 0) ? max_v : 1.0; 
+    
+    if ((end_pt_ - local_target_pt_).norm() < (safe_max_v * safe_max_v) / (2 * planner_manager_->pp_.max_acc_))
     {
       local_target_vel_ = Eigen::Vector3d::Zero();
     }
@@ -975,6 +1033,7 @@ namespace ego_planner
     {
       local_target_vel_ = planner_manager_->global_data_.getVelocity(t);
     }
+    
+    RCLCPP_INFO(node_->get_logger(), "Local Target gefunden: [%.2f, %.2f, %.2f]", local_target_pt_(0), local_target_pt_(1), local_target_pt_(2));
   }
-
 } // namespace ego_planner
