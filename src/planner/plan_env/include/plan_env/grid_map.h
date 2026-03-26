@@ -173,6 +173,7 @@ public:
   inline int getOccupancy(Eigen::Vector3d pos);
   inline int getOccupancy(Eigen::Vector3i id);
   inline int getInflateOccupancy(Eigen::Vector3d pos);
+  inline int getInflateOccupancy(Eigen::Vector3i id);
 
   inline void boundIndex(Eigen::Vector3i &id);
   inline bool isUnknown(const Eigen::Vector3i &id);
@@ -365,6 +366,14 @@ inline int GridMap::getInflateOccupancy(Eigen::Vector3d pos)
   return int(md_.occupancy_buffer_inflate_[toAddress(id)]);
 }
 
+inline int GridMap::getInflateOccupancy(Eigen::Vector3i id)
+{
+  if (!isInMap(id))
+    return -1;
+
+  return int(md_.occupancy_buffer_inflate_[toAddress(id)]);
+}
+
 inline int GridMap::getOccupancy(Eigen::Vector3i id)
 {
   if (id(0) < 0 || id(0) >= mp_.map_voxel_num_(0) || id(1) < 0 || id(1) >= mp_.map_voxel_num_(1) ||
@@ -447,5 +456,15 @@ inline void GridMap::inflatePoint(const Eigen::Vector3i &pt, int step, vector<Ei
 }
 
 inline double GridMap::getResolution() { return mp_.resolution_; }
+
+inline int GridMap::getVoxelNum() { 
+  // Gibt die Gesamtanzahl der Voxeln in der Karte zurück (X * Y * Z)
+  return mp_.map_voxel_num_(0) * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2); 
+}
+
+// inline Eigen::Vector3d GridMap::getOrigin() { 
+//   // Gibt den Ursprung der Karte zurück
+//   return mp_.map_origin_; 
+// }
 
 #endif

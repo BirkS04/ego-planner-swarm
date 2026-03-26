@@ -58,6 +58,17 @@ namespace ego_planner
     planner_manager_->deliverTrajToOptimizer(); // store trajectories
     planner_manager_->setDroneIdtoOpt();
 
+        // =============== HIER IST DER RICHTIGE PLATZ ===============
+    if (target_type_ == TARGET_TYPE::EXPLORATION_TARGET) {
+        expl_manager_.reset(new fast_planner::FastExplorationManager);
+        
+        // Jetzt existiert die grid_map_ wirklich!
+        expl_manager_->initialize(node_, planner_manager_->grid_map_);
+        RCLCPP_INFO(node_->get_logger(), "FSM: Exploration Mode aktiviert!");
+        
+        have_trigger_ = true; 
+    }
+
     /* callback*/
     exec_timer_ = node_->create_wall_timer(std::chrono::milliseconds(10),
                                            std::bind(&EGOReplanFSM::execFSMCallback, this));
@@ -491,8 +502,21 @@ namespace ego_planner
 
     case WAIT_TARGET:
     {
+      if (target_type_ == TARGET_TYPE::EXPLORATION_TARGET) {
+          if (have_odom_) {
+              // ---> NEU: Throttling! Nur 1x pro Sekunde suchen, schont die CPU massiv
+              static auto last_req_time = node_->now();
+              if ((node_->now() - last_req_time).seconds() > 1.0) {
+                  last_req_time = node_->now();
+                  requestExplorationTarget();
+              }
+          }
+          goto force_return;
+      }
+      
       if (!have_target_ || !have_trigger_)
         goto force_return;
+        
       else
       {
         changeFSMExecState(SEQUENTIAL_START, "FSM");
@@ -590,6 +614,12 @@ namespace ego_planner
           {
             wp_id_ = 0;
             planNextWaypoint(wps_[wp_id_]);
+          }
+
+          else if (target_type_ == TARGET_TYPE::EXPLORATION_TARGET)
+          {
+            requestExplorationTarget();
+            goto force_return;
           }
 
           changeFSMExecState(WAIT_TARGET, "FSM");
@@ -754,7 +784,8 @@ bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) // zx-todo
         break;
 
       bool occ = false;
-      occ |= map->getInflateOccupancy(info->position_traj_.evaluateDeBoorT(t));
+      Eigen::Vector3d eval_pos = info->position_traj_.evaluateDeBoorT(t);
+      occ |= map->getInflateOccupancy(eval_pos);
 
       for (size_t id = 0; id < planner_manager_->swarm_trajs_buf_.size(); id++)
       {
@@ -1036,4 +1067,39 @@ bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) // zx-todo
     
     RCLCPP_INFO(node_->get_logger(), "Local Target gefunden: [%.2f, %.2f, %.2f]", local_target_pt_(0), local_target_pt_(1), local_target_pt_(2));
   }
+
+
+  void EGOReplanFSM::requestExplorationTarget()
+  {
+      Eigen::Vector3d next_pos;
+      double next_yaw;
+      
+      // Robuste Berechnung des Yaw-Winkels aus der Odom-Quaternion (verhindert Gimbal Lock / Sprünge)
+      Eigen::Vector3d rot_x = odom_orient_.toRotationMatrix().block<3, 1>(0, 0);
+      double current_yaw = atan2(rot_x(1), rot_x(0));
+
+      // Vektor für den Manager: [Yaw, Yaw_Dot (Geschwindigkeit), Yaw_DDot (Beschleunigung)]
+      Eigen::Vector3d current_yaw_vec(current_yaw, 0.0, 0.0);
+      
+      // Frage den Manager nach dem nächsten Frontier
+      int res = expl_manager_->getNextExplorationGoal(odom_pos_, odom_vel_, current_yaw_vec, next_pos, next_yaw);
+      
+      if (res == fast_planner::SUCCEED) {
+          RCLCPP_INFO(node_->get_logger(), "===> Neues Frontier Ziel: [%.2f, %.2f, %.2f] Yaw: %.2f", next_pos(0), next_pos(1), next_pos(2), next_yaw);
+          
+          current_expl_yaw_ = next_yaw; // Merken fürs Yaw-Planning
+          planNextWaypoint(next_pos);   // Nutze EgoPlanner um dorthin zu kommen
+      } 
+      else if (res == fast_planner::NO_FRONTIER) {
+          RCLCPP_INFO(node_->get_logger(), "Exploration erfolgreich beendet! Keine Frontiers übrig.");
+          changeFSMExecState(WAIT_TARGET, "EXPLORATION_DONE");
+      }
+      else {
+          RCLCPP_WARN(node_->get_logger(), "Exploration fehlgeschlagen. Bleibe stehen.");
+          changeFSMExecState(WAIT_TARGET, "EXPLORATION_FAIL");
+      }
+  }
+
+
+
 } // namespace ego_planner

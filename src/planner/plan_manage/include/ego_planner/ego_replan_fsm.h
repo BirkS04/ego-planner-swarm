@@ -20,6 +20,7 @@
 #include "traj_utils/msg/data_disp.hpp"
 #include "ego_planner/planner_manager.h"
 #include "traj_utils/planning_visualization.h"
+#include <exploration_manager/fast_exploration_manager.h>
 
 using std::vector;
 
@@ -45,8 +46,16 @@ namespace ego_planner
     {
       MANUAL_TARGET = 1,
       PRESET_TARGET = 2,
-      REFENCE_PATH = 3
+      REFENCE_PATH = 3,
+      EXPLORATION_TARGET = 4
     };
+
+    // --- NEU: Pointer für den Exploration Manager ---
+    std::shared_ptr<fast_planner::FastExplorationManager> expl_manager_;
+    
+    // --- NEU: Hilfsfunktion für Exploration ---
+    void requestExplorationTarget();
+    double current_expl_yaw_; // Speichert das gewünschte Ziel-Yaw
 
     /* planning utils */
     EGOPlannerManager::Ptr planner_manager_;

@@ -536,12 +536,17 @@ void GridMap::raycastProcess()
       continue;
     }
 
+    // ========================================================
+    // FÜR FUEL AUSKOMMENTIERT: Raycast soll global updaten!
+    // ========================================================
+    /*
     bool in_local = idx(0) >= min_id(0) && idx(0) <= max_id(0) && idx(1) >= min_id(1) &&
                     idx(1) <= max_id(1) && idx(2) >= min_id(2) && idx(2) <= max_id(2);
     if (!in_local)
     {
       md_.occupancy_buffer_[idx_ctns] = mp_.clamp_min_log_;
     }
+    */
 
     md_.occupancy_buffer_[idx_ctns] =
         std::min(std::max(md_.occupancy_buffer_[idx_ctns] + log_odds_update, mp_.clamp_min_log_),
@@ -597,56 +602,56 @@ void GridMap::clearAndInflateLocalMap()
 
   // clear data outside the local range
 
-  for (int x = min_cut_m(0); x <= max_cut_m(0); ++x)
-    for (int y = min_cut_m(1); y <= max_cut_m(1); ++y)
-    {
+  // for (int x = min_cut_m(0); x <= max_cut_m(0); ++x)
+  //   for (int y = min_cut_m(1); y <= max_cut_m(1); ++y)
+  //   {
 
-      for (int z = min_cut_m(2); z < min_cut(2); ++z)
-      {
-        int idx = toAddress(x, y, z);
-        md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
-      }
+  //     for (int z = min_cut_m(2); z < min_cut(2); ++z)
+  //     {
+  //       int idx = toAddress(x, y, z);
+  //       md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
+  //     }
 
-      for (int z = max_cut(2) + 1; z <= max_cut_m(2); ++z)
-      {
-        int idx = toAddress(x, y, z);
-        md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
-      }
-    }
+  //     for (int z = max_cut(2) + 1; z <= max_cut_m(2); ++z)
+  //     {
+  //       int idx = toAddress(x, y, z);
+  //       md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
+  //     }
+  //   }
 
-  for (int z = min_cut_m(2); z <= max_cut_m(2); ++z)
-    for (int x = min_cut_m(0); x <= max_cut_m(0); ++x)
-    {
+  // for (int z = min_cut_m(2); z <= max_cut_m(2); ++z)
+  //   for (int x = min_cut_m(0); x <= max_cut_m(0); ++x)
+  //   {
 
-      for (int y = min_cut_m(1); y < min_cut(1); ++y)
-      {
-        int idx = toAddress(x, y, z);
-        md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
-      }
+  //     for (int y = min_cut_m(1); y < min_cut(1); ++y)
+  //     {
+  //       int idx = toAddress(x, y, z);
+  //       md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
+  //     }
 
-      for (int y = max_cut(1) + 1; y <= max_cut_m(1); ++y)
-      {
-        int idx = toAddress(x, y, z);
-        md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
-      }
-    }
+  //     for (int y = max_cut(1) + 1; y <= max_cut_m(1); ++y)
+  //     {
+  //       int idx = toAddress(x, y, z);
+  //       md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
+  //     }
+  //   }
 
-  for (int y = min_cut_m(1); y <= max_cut_m(1); ++y)
-    for (int z = min_cut_m(2); z <= max_cut_m(2); ++z)
-    {
+  // for (int y = min_cut_m(1); y <= max_cut_m(1); ++y)
+  //   for (int z = min_cut_m(2); z <= max_cut_m(2); ++z)
+  //   {
 
-      for (int x = min_cut_m(0); x < min_cut(0); ++x)
-      {
-        int idx = toAddress(x, y, z);
-        md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
-      }
+  //     for (int x = min_cut_m(0); x < min_cut(0); ++x)
+  //     {
+  //       int idx = toAddress(x, y, z);
+  //       md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
+  //     }
 
-      for (int x = max_cut(0) + 1; x <= max_cut_m(0); ++x)
-      {
-        int idx = toAddress(x, y, z);
-        md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
-      }
-    }
+  //     for (int x = max_cut(0) + 1; x <= max_cut_m(0); ++x)
+  //     {
+  //       int idx = toAddress(x, y, z);
+  //       md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
+  //     }
+  //   }
 
   // inflate occupied voxels to compensate robot size
 
@@ -805,106 +810,99 @@ void GridMap::odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom)
 
 void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
 {
-
   pcl::PointCloud<pcl::PointXYZ> latest_cloud;
   pcl::fromROSMsg(*img, latest_cloud);
 
   md_.has_cloud_ = true;
 
-  if (!md_.has_odom_)
-  {
-    std::cout << "no odom!" << std::endl;
+  if (!md_.has_odom_) {
     return;
   }
 
-  if (latest_cloud.points.size() == 0)
-    return;
+  if (latest_cloud.points.empty()) return;
 
   if (isnan(md_.camera_pos_(0)) || isnan(md_.camera_pos_(1)) || isnan(md_.camera_pos_(2)))
     return;
 
-  this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
-                    md_.camera_pos_ + mp_.local_update_range_);
-
-  pcl::PointXYZ pt;
-  Eigen::Vector3d p3d, p3d_inf;
-
+  // 1. Ego Planner Logik: Alle Hindernisse eintragen (wie bisher, für B-Spline)
+  double max_x = mp_.map_min_boundary_(0), max_y = mp_.map_min_boundary_(1), max_z = mp_.map_min_boundary_(2);
+  double min_x = mp_.map_max_boundary_(0), min_y = mp_.map_max_boundary_(1), min_z = mp_.map_max_boundary_(2);
+  
   int inf_step = ceil(mp_.obstacles_inflation_ / mp_.resolution_);
   int inf_step_z = 1;
 
-  double max_x, max_y, max_z, min_x, min_y, min_z;
-
-  min_x = mp_.map_max_boundary_(0);
-  min_y = mp_.map_max_boundary_(1);
-  min_z = mp_.map_max_boundary_(2);
-
-  max_x = mp_.map_min_boundary_(0);
-  max_y = mp_.map_min_boundary_(1);
-  max_z = mp_.map_min_boundary_(2);
-
-  for (size_t i = 0; i < latest_cloud.points.size(); ++i)
-  {
-    pt = latest_cloud.points[i];
-    p3d(0) = pt.x, p3d(1) = pt.y, p3d(2) = pt.z;
-
-    /* point inside update range */
+  for (size_t i = 0; i < latest_cloud.points.size(); ++i) {
+    pcl::PointXYZ pt = latest_cloud.points[i];
+    Eigen::Vector3d p3d(pt.x, pt.y, pt.z);
     Eigen::Vector3d devi = p3d - md_.camera_pos_;
-    Eigen::Vector3i inf_pt;
-
+    
+    // Nur Punkte innerhalb der lokalen Update-Range betrachten
     if (fabs(devi(0)) < mp_.local_update_range_(0) && fabs(devi(1)) < mp_.local_update_range_(1) &&
-        fabs(devi(2)) < mp_.local_update_range_(2))
+        fabs(devi(2)) < mp_.local_update_range_(2)) 
     {
-
-      /* inflate the point */
-      // 点云膨胀
+      // Inflaten für Ego Planner (Sehr schnell, keine Raycasts)
+      Eigen::Vector3d p3d_inf;
+      Eigen::Vector3i inf_pt;
       for (int x = -inf_step; x <= inf_step; ++x)
         for (int y = -inf_step; y <= inf_step; ++y)
-          for (int z = -inf_step_z; z <= inf_step_z; ++z)
-          {
-
+          for (int z = -inf_step_z; z <= inf_step_z; ++z) {
             p3d_inf(0) = pt.x + x * mp_.resolution_;
             p3d_inf(1) = pt.y + y * mp_.resolution_;
             p3d_inf(2) = pt.z + z * mp_.resolution_;
 
-            max_x = max(max_x, p3d_inf(0));
-            max_y = max(max_y, p3d_inf(1));
-            max_z = max(max_z, p3d_inf(2));
-
-            min_x = min(min_x, p3d_inf(0));
-            min_y = min(min_y, p3d_inf(1));
-            min_z = min(min_z, p3d_inf(2));
+            max_x = max(max_x, p3d_inf(0)); max_y = max(max_y, p3d_inf(1)); max_z = max(max_z, p3d_inf(2));
+            min_x = min(min_x, p3d_inf(0)); min_y = min(min_y, p3d_inf(1)); min_z = min(min_z, p3d_inf(2));
 
             posToIndex(p3d_inf, inf_pt);
-
-            if (!isInMap(inf_pt))
-              continue;
-
-            int idx_inf = toAddress(inf_pt);
-
-            md_.occupancy_buffer_inflate_[idx_inf] = 1;
+            if (isInMap(inf_pt)) {
+              md_.occupancy_buffer_inflate_[toAddress(inf_pt)] = 1;
+            }
           }
     }
   }
 
-  min_x = min(min_x, md_.camera_pos_(0));
-  min_y = min(min_y, md_.camera_pos_(1));
-  min_z = min(min_z, md_.camera_pos_(2));
+  // ======================================================================
+  // 2. FUEL Logik: RAYCASTING (Optimiert für CPU-Effizienz!)
+  // ======================================================================
+  
+  // CPU-Sparmaßnahme: Wir überspringen Punkte! (Nur jeden 5. Punkt raycasten)
+  const int RAYCAST_SKIP_STEP = 5; 
+  
+  md_.proj_points_cnt = 0;
+  if (latest_cloud.points.size() > md_.proj_points_.size()) {
+    md_.proj_points_.resize(latest_cloud.points.size());
+  }
 
-  max_x = max(max_x, md_.camera_pos_(0));
-  max_y = max(max_y, md_.camera_pos_(1));
-  max_z = max(max_z, md_.camera_pos_(2));
+  for (size_t i = 0; i < latest_cloud.points.size(); i += RAYCAST_SKIP_STEP) {
+    pcl::PointXYZ pt = latest_cloud.points[i];
+    Eigen::Vector3d p3d(pt.x, pt.y, pt.z);
+    
+    // Wir werfen Punkte weg, die zu weit weg sind (spart massiv CPU beim Raycast)
+    if ((p3d - md_.camera_pos_).norm() < mp_.max_ray_length_) {
+       md_.proj_points_[md_.proj_points_cnt++] = p3d;
+    }
+  }
 
+  // Jetzt rufen wir den Raycaster auf. Er schnappt sich 'proj_points_' 
+  // und berechnet den FREIEN Raum für FUEL.
+  if (md_.proj_points_cnt > 0) {
+    raycastProcess();
+  }
+  // ======================================================================
+
+  min_x = min(min_x, md_.camera_pos_(0)); min_y = min(min_y, md_.camera_pos_(1)); min_z = min(min_z, md_.camera_pos_(2));
+  max_x = max(max_x, md_.camera_pos_(0)); max_y = max(max_y, md_.camera_pos_(1)); max_z = max(max_z, md_.camera_pos_(2));
   max_z = max(max_z, mp_.ground_height_);
 
   posToIndex(Eigen::Vector3d(max_x, max_y, max_z), md_.local_bound_max_);
   posToIndex(Eigen::Vector3d(min_x, min_y, min_z), md_.local_bound_min_);
 
-  // 更新局部地图边界
   boundIndex(md_.local_bound_min_);
   boundIndex(md_.local_bound_max_);
+  
+  md_.local_updated_ = true;
 
-  // add virtual ceiling to limit flight height
-  // 添加虚拟天花板控制飞行高度
+  // Virtuelle Decke eintragen
   if (mp_.virtual_ceil_height_ > -0.5) {
     int ceil_id = floor((mp_.virtual_ceil_height_ - mp_.map_origin_(2)) * mp_.resolution_inv_) - 1;
     for (int x = md_.local_bound_min_(0); x <= md_.local_bound_max_(0); ++x)
@@ -913,32 +911,36 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
       }
   }
 }
-
 void GridMap::publishMap()
 {
+  pcl::PointXYZRGB pt;
+  pcl::PointCloud<pcl::PointXYZRGB> cloud;
 
-  if (map_pub_->get_subscription_count() <= 0)
-    return;
+  // ========================================================
+  // ÄNDERUNG: Wir iterieren jetzt über die GESAMTE globale Map!
+  // ========================================================
+  Eigen::Vector3i min_cut(0, 0, 0);
+  Eigen::Vector3i max_cut = mp_.map_voxel_num_ - Eigen::Vector3i(1, 1, 1);
+  // (Margin-Berechnung und boundIndex() brauchen wir hier nicht mehr, 
+  // da wir ohnehin die absoluten Map-Grenzen nutzen)
 
-  pcl::PointXYZ pt;
-  pcl::PointCloud<pcl::PointXYZ> cloud;
+  int count_total = 0;
+  int count_unknown = 0;
+  int count_free = 0;
+  int count_occ = 0;
 
-  Eigen::Vector3i min_cut = md_.local_bound_min_;
-  Eigen::Vector3i max_cut = md_.local_bound_max_;
-
-  int lmm = mp_.local_map_margin_ / 2;
-  min_cut -= Eigen::Vector3i(lmm, lmm, lmm);
-  max_cut += Eigen::Vector3i(lmm, lmm, lmm);
-
-  boundIndex(min_cut);
-  boundIndex(max_cut);
-
-  for (int x = min_cut(0); x <= max_cut(0); ++x)
-    for (int y = min_cut(1); y <= max_cut(1); ++y)
+  for (int x = min_cut(0); x <= max_cut(0); ++x) {
+    for (int y = min_cut(1); y <= max_cut(1); ++y) {
       for (int z = min_cut(2); z <= max_cut(2); ++z)
       {
-        if (md_.occupancy_buffer_[toAddress(x, y, z)] < mp_.min_occupancy_log_)
-          continue;
+        int idx = toAddress(x, y, z);
+        count_total++;
+        
+        // Zählen und Filtern von UNKNOWN
+        if (md_.occupancy_buffer_[idx] < mp_.clamp_min_log_ - 1e-3) {
+          count_unknown++;
+          continue; // Wird nicht gezeichnet
+        }
 
         Eigen::Vector3d pos;
         indexToPos(Eigen::Vector3i(x, y, z), pos);
@@ -948,8 +950,29 @@ void GridMap::publishMap()
         pt.x = pos(0);
         pt.y = pos(1);
         pt.z = pos(2);
+
+        if (md_.occupancy_buffer_inflate_[idx] == 1) {
+          pt.r = 255; pt.g = 0; pt.b = 0; // Rot
+          count_occ++;
+        } 
+        else if (md_.occupancy_buffer_[idx] > mp_.min_occupancy_log_) {
+          pt.r = 255; pt.g = 128; pt.b = 0; // Orange
+          count_occ++;
+        }
+        else {
+          pt.r = 0; pt.g = 255; pt.b = 0; // Grün
+          count_free++;
+        }
+
         cloud.push_back(pt);
       }
+    }
+  }
+
+  // WICHTIG: Das Loggt alle 2 Sekunden den Zustand deiner Karte ins Terminal!
+  RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 2000, 
+      "Map-Debug -> Voxel geprüft: %d | Unknown: %d | Free: %d | Occupied: %d | Punkte in Cloud: %lu", 
+      count_total, count_unknown, count_free, count_occ, cloud.points.size());
 
   cloud.width = cloud.points.size();
   cloud.height = 1;
@@ -960,6 +983,7 @@ void GridMap::publishMap()
   pcl::toROSMsg(cloud, cloud_msg);
   map_pub_->publish(cloud_msg);
 }
+
 
 void GridMap::publishMapInflate(bool all_info)
 {
