@@ -510,7 +510,7 @@ namespace ego_planner
       for (double a = 1.0; a > 0.0; a -= step_size)
       {
         // TODO:没搞懂这是干嘛的
-        occ = grid_map_->getInflateOccupancy(a * init_points.col(i - 1) + (1 - a) * init_points.col(i));
+        occ = grid_map_->getInflateOccupancy(Eigen::Vector3d((a * init_points.col(i - 1) + (1 - a) * init_points.col(i)).head<3>()));
         // cout << " " << occ;
         //  cout << setprecision(5);
         //  cout << (a * init_points.col(i-1) + (1-a) * init_points.col(i)).transpose() << " occ1=" << occ << endl;
@@ -737,7 +737,7 @@ namespace ego_planner
             for (double a = length; a >= 0.0; a -= grid_map_->getResolution())
             {
               // 通过线性插值计算采样点位置
-              occ = grid_map_->getInflateOccupancy((a / length) * intersection_point + (1 - a / length) * init_points.col(j));
+              occ = grid_map_->getInflateOccupancy(Eigen::Vector3d(((a / length) * intersection_point + (1 - a / length) * init_points.col(j)).head<3>()));
 
               if (occ || a < grid_map_->getResolution())
               {
@@ -1308,7 +1308,7 @@ namespace ego_planner
     for (int i = order_ - 1; i <= i_end; ++i)
     {
 
-      bool occ = grid_map_->getInflateOccupancy(cps_.points.col(i));
+      bool occ = grid_map_->getInflateOccupancy(Eigen::Vector3d(cps_.points.col(i).head<3>()));
 
       /*** check if the new collision will be valid ***/
       if (occ)
@@ -1331,7 +1331,7 @@ namespace ego_planner
         int j;
         for (j = i - 1; j >= 0; --j)
         {
-          occ = grid_map_->getInflateOccupancy(cps_.points.col(j));
+          occ = grid_map_->getInflateOccupancy(Eigen::Vector3d(cps_.points.col(j).head<3>()));
           if (!occ)
           {
             in_id = j;
@@ -1346,7 +1346,7 @@ namespace ego_planner
 
         for (j = i + 1; j < cps_.size; ++j)
         {
-          occ = grid_map_->getInflateOccupancy(cps_.points.col(j));
+          occ = grid_map_->getInflateOccupancy(Eigen::Vector3d(cps_.points.col(j).head<3>()));
 
           if (!occ)
           {
@@ -1446,7 +1446,8 @@ namespace ego_planner
               cps_.flag_temp[j] = true;
               for (double a = length; a >= 0.0; a -= grid_map_->getResolution())
               {
-                bool occ = grid_map_->getInflateOccupancy((a / length) * intersection_point + (1 - a / length) * cps_.points.col(j));
+                Eigen::Vector3d check_pos = (a / length) * intersection_point + (1 - a / length) * cps_.points.col(j).head<3>();
+bool occ = grid_map_->getInflateOccupancy(check_pos);
 
                 if (occ || a < grid_map_->getResolution())
                 {
@@ -1616,8 +1617,8 @@ namespace ego_planner
         // 遍历轨迹的前2/3部分进行障碍物检测
         for (double t = tm; t < tmp * 2 / 3; t += t_step) // Only check the closest 2/3 partition of the whole trajectory.
         {
-          flag_occ = grid_map_->getInflateOccupancy(traj.evaluateDeBoorT(t));
-          if (flag_occ)
+          Eigen::Vector3d eval_pos = traj.evaluateDeBoorT(t).head<3>();
+        flag_occ = grid_map_->getInflateOccupancy(eval_pos);
           {
             // cout << "hit_obs, t=" << t << " P=" << traj.evaluateDeBoorT(t).transpose() << endl;
 
@@ -1766,7 +1767,8 @@ namespace ego_planner
       double t_step = (tmp - tm) / ((traj.evaluateDeBoorT(tmp) - traj.evaluateDeBoorT(tm)).norm() / grid_map_->getResolution()); // Step size is defined as the maximum size that can passes throgth every gird.
       for (double t = tm; t < tmp * 2 / 3; t += t_step)
       {
-        if (grid_map_->getInflateOccupancy(traj.evaluateDeBoorT(t)))
+        Eigen::Vector3d eval_pos = traj.evaluateDeBoorT(t).head<3>();
+        if (grid_map_->getInflateOccupancy(eval_pos))
         {
           // cout << "Refined traj hit_obs, t=" << t << " P=" << traj.evaluateDeBoorT(t).transpose() << endl;
 
