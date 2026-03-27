@@ -866,7 +866,7 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   // ======================================================================
   
   // CPU-Sparmaßnahme: Wir überspringen Punkte! (Nur jeden 5. Punkt raycasten)
-  const int RAYCAST_SKIP_STEP = 5; 
+  const int RAYCAST_SKIP_STEP = 1; 
   
   md_.proj_points_cnt = 0;
   if (latest_cloud.points.size() > md_.proj_points_.size()) {

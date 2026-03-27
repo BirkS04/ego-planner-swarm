@@ -1619,19 +1619,25 @@ bool occ = grid_map_->getInflateOccupancy(check_pos);
         {
           Eigen::Vector3d eval_pos = traj.evaluateDeBoorT(t).head<3>();
         flag_occ = grid_map_->getInflateOccupancy(eval_pos);
-          {
-            // cout << "hit_obs, t=" << t << " P=" << traj.evaluateDeBoorT(t).transpose() << endl;
+if (flag_occ) // Hier wird auf Kollision geprüft
+  {
+    // cout << "hit_obs, t=" << t << " P=" << traj.evaluateDeBoorT(t).transpose() << endl;
 
-            // 如果在前三个控制点范围内检测到了碰撞则视为不可行
-            if (t <= bspline_interval_) // First 3 control points in obstacles!
-            {
-              // cout << cps_.points.col(1).transpose() << "\n"
-              //      << cps_.points.col(2).transpose() << "\n"
-              //      << cps_.points.col(3).transpose() << "\n"
-              //      << cps_.points.col(4).transpose() << endl;
-              RCLCPP_WARN(rclcpp::get_logger("rebound_optimize"), "First 3 control points in obstacles! return false, t=%f", t);
-              return false;
-            }
+    if (t <= bspline_interval_) // First 3 control points in obstacles!
+      {
+        // --- HIER BEGINNT DEIN DEBUG-CODE ---
+        Eigen::Vector3d start_pos = traj.evaluateDeBoorT(tm).head<3>();
+        double dist_to_start = (eval_pos - start_pos).norm();
+        
+        RCLCPP_WARN(rclcpp::get_logger("rebound_optimize"), 
+                    "First 3 control points in obstacles! return false, t=%f", t);
+        RCLCPP_WARN(rclcpp::get_logger("rebound_optimize"), 
+                    "KOLLISION BEI: [%.2f, %.2f, %.2f], Distanz zum Start: %.2fm", 
+                    eval_pos(0), eval_pos(1), eval_pos(2), dist_to_start);
+        // --- HIER ENDET DEIN DEBUG-CODE ---
+        
+        return false;
+      }
 
             break;
           }

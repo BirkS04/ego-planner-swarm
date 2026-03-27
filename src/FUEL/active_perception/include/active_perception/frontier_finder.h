@@ -8,6 +8,9 @@
 #include <list>
 #include <utility>
 
+// ROS 2 Visualization
+#include <visualization_msgs/msg/marker_array.hpp>
+
 // Das ist die magische Brücke zu EgoPlanner!
 #include "plan_env/grid_map.h" 
 
@@ -70,6 +73,9 @@ public:
 
   shared_ptr<PerceptionUtils> percep_utils_;
 
+  // Visualisierung in RViz
+  void visualizeFrontiers();
+
 private:
   void splitLargeFrontiers(list<Frontier>& frontiers);
   bool splitHorizontally(const Frontier& frontier, list<Frontier>& splits);
@@ -86,7 +92,12 @@ private:
   vector<Eigen::Vector3i> sixNeighbors(const Eigen::Vector3i& voxel);
   vector<Eigen::Vector3i> tenNeighbors(const Eigen::Vector3i& voxel);
   vector<Eigen::Vector3i> allNeighbors(const Eigen::Vector3i& voxel);
+  
   bool isNeighborUnknown(const Eigen::Vector3i& voxel);
+  
+  // NEU: Volumetrischer Check gegen Schweizer-Käse-Löcher
+  bool isTrueFrontierVoxel(const Eigen::Vector3i& voxel);
+
   void expandFrontier(const Eigen::Vector3i& first);
 
   // Wrapper of Grid map
@@ -114,11 +125,17 @@ private:
   int down_sample_;
   double min_view_finish_fraction_, resolution_;
   int min_visib_num_, candidate_rnum_;
+  
+  // NEU: Toleranz gegen Schweizer-Käse-Löcher
+  int swiss_cheese_tolerance_;
 
   // Utils
   GridMap::Ptr grid_map_; // <-- HIER IST DIE EGOPLANNER KARTE!
   unique_ptr<RayCaster> raycaster_;
   rclcpp::Node::SharedPtr node_; // ROS2 Node Handle
+  
+  // Publisher für RViz
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
 };
 
 }  // namespace fast_planner
