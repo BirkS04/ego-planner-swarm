@@ -44,6 +44,7 @@ void FastExplorationManager::initialize(rclcpp::Node::SharedPtr& node, GridMap::
     // ---> NEU: Publisher erstellen
   marker_pub_ = node_->create_publisher<visualization_msgs::msg::MarkerArray>("exploration/frontiers", 10);
   
+ last_global_plan_time_ = node_->now();
   RCLCPP_INFO(node_->get_logger(), "FastExplorationManager erfolgreich initialisiert.");
 }
 
@@ -51,14 +52,41 @@ int FastExplorationManager::getNextExplorationGoal(
     const Vector3d& pos, const Vector3d& vel, const Vector3d& yaw, 
     Vector3d& next_pos, double& next_yaw) {
     
+  auto now = node_->now();
+  double time_since_last_plan = (now - last_global_plan_time_).seconds();
+
+  // =========================================================================
+  // SCHRITT 1: Prüfen, ob wir die gespeicherte TSP-Tour nutzen können
+  // Bedingung: Es gibt noch Punkte in der Liste UND die Liste ist jünger als 5s.
+  // (Nach 5s erzwingen wir ein Replan, weil sich die Map durch den Flug verändert hat).
+  // =========================================================================
+  if (current_tour_idx_ < tour_indices_.size() && time_since_last_plan < 5.0) {
+      int idx = tour_indices_[current_tour_idx_];
+      
+      // Sicherheits-Check, falls die Arrays aus irgendeinem Grund geleert wurden
+      if (idx < ed_->points_.size()) {
+          next_pos = ed_->points_[idx];
+          next_yaw = ed_->yaws_[idx];
+          
+          current_tour_idx_++; // Index für das nächste Mal hochzählen
+          
+          RCLCPP_INFO(node_->get_logger(), "Nutze TSP Tour (Punkt %d von %lu) -> [%.2f, %.2f, %.2f]", 
+                      current_tour_idx_, tour_indices_.size(), next_pos(0), next_pos(1), next_pos(2));
+          return SUCCEED;
+      }
+  }
+
+  // =========================================================================
+  // SCHRITT 2: FULL REPLAN (Frontiers suchen & neue TSP Tour berechnen)
+  // =========================================================================
+  RCLCPP_INFO(node_->get_logger(), "Starte Full Replan (Suche Frontiers & TSP)...");
   auto t1 = node_->now();
   ed_->views_.clear();
   ed_->global_tour_.clear();
+  tour_indices_.clear();
+  current_tour_idx_ = 0;
 
-  // 1. Frontiers suchen
   frontier_finder_->searchFrontiers();
-
-  // 2. Viewpoints berechnen
   frontier_finder_->computeFrontiersToVisit();
   frontier_finder_->getFrontiers(ed_->frontiers_);
 
@@ -70,30 +98,34 @@ int FastExplorationManager::getNextExplorationGoal(
   
   frontier_finder_->getTopViewpointsInfo(pos, ed_->points_, ed_->yaws_, ed_->averages_);
 
-  // 3. Tour planen (TSP) und das nächste Ziel extrahieren
   if (ed_->points_.size() > 1) {
-    vector<int> indices;
-    findGlobalTour(pos, vel, yaw, indices);
+    findGlobalTour(pos, vel, yaw, tour_indices_);
     
-    // Wir nehmen direkt das erste Ziel der optimalen Tour!
-    next_pos = ed_->points_[indices[0]];
-    next_yaw = ed_->yaws_[indices[0]];
+    // Nimm das erste Ziel und setze den Index für den nächsten Aufruf auf 1
+    int idx = tour_indices_[0];
+    next_pos = ed_->points_[idx];
+    next_yaw = ed_->yaws_[idx];
+    current_tour_idx_ = 1; 
     
   } else if (ed_->points_.size() == 1) {
     next_pos = ed_->points_[0];
     next_yaw = ed_->yaws_[0];
+    // Nur ein Ziel, Tour bleibt leer
   } else {
     RCLCPP_ERROR(node_->get_logger(), "Empty destination.");
     return FAIL;
   }
 
+  last_global_plan_time_ = now; // Timer resetten
+
   double total_time = (node_->now() - t1).seconds();
-  RCLCPP_INFO(node_->get_logger(), "Next view gefunden: [%.2f, %.2f, %.2f], Yaw: %.2f (Dauer: %.3fs)", 
-              next_pos(0), next_pos(1), next_pos(2), next_yaw, total_time);
+  RCLCPP_INFO(node_->get_logger(), "Neuer TSP Plan fertig: [%.2f, %.2f, %.2f] (Dauer: %.3fs)", 
+              next_pos(0), next_pos(1), next_pos(2), total_time);
 
   visualizeFrontiers();
   return SUCCEED;
 }
+
 
 void FastExplorationManager::findGlobalTour(
     const Vector3d& cur_pos, const Vector3d& cur_vel, const Vector3d cur_yaw,

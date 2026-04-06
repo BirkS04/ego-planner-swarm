@@ -605,6 +605,20 @@ namespace ego_planner
       }
       else if ((local_target_pt_ - end_pt_).norm() < 1e-3) // close to the global target
       {
+        // ==============================================================
+        // ANTI-STUTTERING FIX FÜR EXPLORATION
+        // Wenn die Drohne nur noch 1.0 Sekunde (oder weniger) vom Ziel
+        // entfernt ist, fordern wir SCHON JETZT das nächste Ziel an!
+        // Ego-Planner blendet den Weg dann fließend (smooth) ineinander,
+        // ohne dass die Drohne anhalten muss.
+        // ==============================================================
+        if (target_type_ == TARGET_TYPE::EXPLORATION_TARGET && t_cur > info->duration_ - 1.0)
+        {
+          requestExplorationTarget();
+          goto force_return; // FSM Timer MUSS neu gestartet werden!
+        }
+
+        // Alter Code für Preset Targets (Wartet bis zum kompletten Stillstand)
         if (t_cur > info->duration_ - 1e-2)
         {
           have_target_ = false;
@@ -615,9 +629,9 @@ namespace ego_planner
             wp_id_ = 0;
             planNextWaypoint(wps_[wp_id_]);
           }
-
           else if (target_type_ == TARGET_TYPE::EXPLORATION_TARGET)
           {
+            // Fallback, falls der 1.0s Check verpasst wurde
             requestExplorationTarget();
             goto force_return;
           }

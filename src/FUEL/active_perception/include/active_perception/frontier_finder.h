@@ -94,8 +94,8 @@ private:
   vector<Eigen::Vector3i> allNeighbors(const Eigen::Vector3i& voxel);
   
   bool isNeighborUnknown(const Eigen::Vector3i& voxel);
-  
-  // NEU: Volumetrischer Check gegen Schweizer-Käse-Löcher
+
+  // Schneller Filter für Lidar-Artefakte
   bool isTrueFrontierVoxel(const Eigen::Vector3i& voxel);
 
   void expandFrontier(const Eigen::Vector3i& first);
@@ -126,8 +126,6 @@ private:
   double min_view_finish_fraction_, resolution_;
   int min_visib_num_, candidate_rnum_;
   
-  // NEU: Toleranz gegen Schweizer-Käse-Löcher
-  int swiss_cheese_tolerance_;
 
   // Utils
   GridMap::Ptr grid_map_; // <-- HIER IST DIE EGOPLANNER KARTE!

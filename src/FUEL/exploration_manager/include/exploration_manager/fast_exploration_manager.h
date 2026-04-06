@@ -41,13 +41,20 @@ private:
   rclcpp::Node::SharedPtr node_;
   GridMap::Ptr grid_map_;
 
-    // ---> NEU: Publisher und Methode für RViz
+  // ---> NEU: Publisher und Methode für RViz
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   void visualizeFrontiers();
 
   // LKH TSP Solver für die globale Tour
   void findGlobalTour(const Vector3d& cur_pos, const Vector3d& cur_vel, const Vector3d cur_yaw,
                       vector<int>& indices);
+
+  // ==========================================
+  // ---> NEU: Tour Memory (TSP Gedächtnis)
+  // ==========================================
+  std::vector<int> tour_indices_;
+  int current_tour_idx_{0};
+  rclcpp::Time last_global_plan_time_;
 
 public:
   typedef shared_ptr<FastExplorationManager> Ptr;

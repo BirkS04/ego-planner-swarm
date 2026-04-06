@@ -54,9 +54,11 @@ namespace ego_planner
 
     if ((start_pt - local_target_pt).norm() < 0.2)
     {
-      cout << "Close to goal" << endl;
-      continous_failures_count_++;
-      return false;
+      cout << "Close to goal, generating hover trajectory." << endl;
+      // Statt abzubrechen, generieren wir eine statische Trajektorie an der aktuellen Position
+      EmergencyStop(start_pt); 
+      continous_failures_count_ = 0; // WICHTIG: Fail-Counter resetten!
+      return true; // Erfolg an die FSM melden
     }
 
     bspline_optimizer_->setLocalTargetPt(local_target_pt);

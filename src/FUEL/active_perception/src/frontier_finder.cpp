@@ -35,9 +35,7 @@ FrontierFinder::FrontierFinder(const GridMap::Ptr& grid_map, rclcpp::Node::Share
   node_->declare_parameter("frontier.down_sample", 2);
   node_->declare_parameter("frontier.min_visib_num", 20);
   node_->declare_parameter("frontier.min_view_finish_fraction", 0.2);
-  
-  // Schweizer Käse Filter Toleranz
-  node_->declare_parameter("frontier.swiss_cheese_tolerance", 25);
+
 
   node_->get_parameter("frontier.cluster_min", cluster_min_);
   node_->get_parameter("frontier.cluster_size_xy", cluster_size_xy_);
@@ -51,7 +49,6 @@ FrontierFinder::FrontierFinder(const GridMap::Ptr& grid_map, rclcpp::Node::Share
   node_->get_parameter("frontier.down_sample", down_sample_);
   node_->get_parameter("frontier.min_visib_num", min_visib_num_);
   node_->get_parameter("frontier.min_view_finish_fraction", min_view_finish_fraction_);
-  node_->get_parameter("frontier.swiss_cheese_tolerance", swiss_cheese_tolerance_);
 
   raycaster_.reset(new RayCaster);
   resolution_ = grid_map_->getResolution();
@@ -115,7 +112,8 @@ void FrontierFinder::searchFrontiers() {
         if (knownfree(cur)) {
           count_known_free++;
           
-          // NEU: Nutze den robusten Volumetrischen Check statt dem einfachen isNeighborUnknown
+          // Nutze den extrem schnellen Standard-Check!
+          // Noise filtern wir später über die cluster_min_ Größe raus.
           if (frontier_flag_[toadr(cur)] == 0 && isTrueFrontierVoxel(cur)) {
             count_is_frontier++;
             expandFrontier(cur);
@@ -144,7 +142,15 @@ void FrontierFinder::expandFrontier(const Eigen::Vector3i& first) {
   cell_queue.push(first);
   frontier_flag_[toadr(first)] = 1;
 
-  int dropped_by_height = 0;
+  // Hole die Bounding-Box Parameter direkt vom Node (oder setze sie als Klassenvariablen)
+  double bb_min_x, bb_min_y, bb_min_z;
+  double bb_max_x, bb_max_y, bb_max_z;
+  node_->get_parameter_or("frontier.bounding_box_min_x", bb_min_x, -10.0);
+  node_->get_parameter_or("frontier.bounding_box_min_y", bb_min_y, -10.0);
+  node_->get_parameter_or("frontier.bounding_box_min_z", bb_min_z, 0.2);
+  node_->get_parameter_or("frontier.bounding_box_max_x", bb_max_x, 10.0);
+  node_->get_parameter_or("frontier.bounding_box_max_y", bb_max_y, 10.0);
+  node_->get_parameter_or("frontier.bounding_box_max_z", bb_max_z, 3.0);
 
   while (!cell_queue.empty()) {
     auto cur = cell_queue.front();
@@ -154,14 +160,16 @@ void FrontierFinder::expandFrontier(const Eigen::Vector3i& first) {
       if (!inmap(nbr)) continue;
       int adr = toadr(nbr);
       
-      // NEU: isTrueFrontierVoxel statt isNeighborUnknown
+      // Schneller Check
       if (frontier_flag_[adr] == 1 || !(knownfree(nbr) && isTrueFrontierVoxel(nbr)))
         continue;
 
       grid_map_->indexToPos(nbr, pos);
-      
-      if (pos[2] < 0.4) {
-        dropped_by_height++;
+
+      // Bounding Box Check (verhindert, dass die Drohne in den Himmel oder Boden plant)
+      if (pos[0] < bb_min_x || pos[0] > bb_max_x ||
+          pos[1] < bb_min_y || pos[1] > bb_max_y ||
+          pos[2] < bb_min_z || pos[2] > bb_max_z) {
         continue;  
       }
       
@@ -178,15 +186,12 @@ void FrontierFinder::expandFrontier(const Eigen::Vector3i& first) {
       computeFrontierInfo(frontier);
       tmp_frontiers_.push_back(frontier);
     } else {
+      // Noise-Cluster verwerfen und Flag zurücksetzen
       for (auto pt_w : expanded) {
         Eigen::Vector3i idx;
         grid_map_->posToIndex(pt_w, idx);
         frontier_flag_[toadr(idx)] = 0;
       }
-      
-      RCLCPP_INFO(node_->get_logger(), 
-        "[FRONTIER DEBUG 2] Cluster VERWORFEN: Groesse = %lu (Minimum ist %d). Rausgefiltert durch Z-Hoehe: %d", 
-        expanded.size(), cluster_min_, dropped_by_height);
     }
   }
 }
@@ -355,8 +360,7 @@ bool FrontierFinder::isFrontierChanged(const Frontier& ft) {
   for (auto cell : ft.cells_) {
     Eigen::Vector3i idx;
     grid_map_->posToIndex(cell, idx);
-    // NEU: isTrueFrontierVoxel statt isNeighborUnknown
-    if (!(knownfree(idx) && isTrueFrontierVoxel(idx))) return true;
+    if (!(knownfree(idx) && isNeighborUnknown(idx))) return true;
   }
   return false;
 }
@@ -571,7 +575,9 @@ void FrontierFinder::sampleViewpoints(Frontier& frontier) {
   for (double rc = candidate_rmin_, dr = (candidate_rmax_ - candidate_rmin_) / candidate_rnum_; rc <= candidate_rmax_ + 1e-3; rc += dr) {
     for (double phi = -M_PI; phi < M_PI; phi += candidate_dphi_) {
       count_total_samples++;
-      const Vector3d sample_pos = frontier.average_ + rc * Vector3d(cos(phi), sin(phi), 0);
+      Vector3d sample_pos = frontier.average_ + rc * Vector3d(cos(phi), sin(phi), 0);
+
+      sample_pos[2] = 1.2; 
 
       if (!grid_map_->isInMap(sample_pos) || grid_map_->getInflateOccupancy(sample_pos) == 1) {
         count_fail_map_occ++;
@@ -626,8 +632,7 @@ bool FrontierFinder::isFrontierCovered() {
       for (auto cell : ftr.cells_) {
         Eigen::Vector3i idx;
         grid_map_->posToIndex(cell, idx);
-        // NEU: isTrueFrontierVoxel statt isNeighborUnknown
-        if (!(knownfree(idx) && isTrueFrontierVoxel(idx)) && ++change_num >= change_thresh)
+        if (!(knownfree(idx) && isNeighborUnknown(idx)) && ++change_num >= change_thresh)
           return true;
       }
     }
@@ -780,32 +785,6 @@ inline bool FrontierFinder::isNeighborUnknown(const Eigen::Vector3i& voxel) {
   return false;
 }
 
-// =========================================================================
-// NEU: Volumetrischer Schweizer-Käse-Filter zur Vermeidung falscher Cluster
-// =========================================================================
-bool FrontierFinder::isTrueFrontierVoxel(const Eigen::Vector3i& voxel) {
-  // Erster Check: Gibt es einen direkten Nachbarn? (Schneller Abbruch)
-  if (!isNeighborUnknown(voxel)) return false;
-
-  int unknown_count = 0;
-  const int search_radius = 2; // Ergibt ein 5x5x5 Gitter = 125 Voxel
-
-  for (int x = -search_radius; x <= search_radius; ++x) {
-    for (int y = -search_radius; y <= search_radius; ++y) {
-      for (int z = -search_radius; z <= search_radius; ++z) {
-        Eigen::Vector3i nbr = voxel + Eigen::Vector3i(x, y, z);
-        
-        if (!inmap(nbr) || grid_map_->isUnknown(nbr)) {
-          unknown_count++;
-        }
-      }
-    }
-  }
-
-  // Nur wenn genug "Unknown" Voxel im Block sind, ist es echter leerer Raum
-  return unknown_count >= swiss_cheese_tolerance_;
-}
-
 inline int FrontierFinder::toadr(const Eigen::Vector3i& idx) {
   return grid_map_->toAddress(idx);
 }
@@ -925,6 +904,33 @@ void FrontierFinder::visualizeFrontiers() {
   }
 
   marker_pub_->publish(marker_array);
+}
+
+// =========================================================================
+// HIGH-PERFORMANCE Schweizer-Käse-Filter (für Livox Mid-360)
+// =========================================================================
+bool FrontierFinder::isTrueFrontierVoxel(const Eigen::Vector3i& voxel) {
+  // 1. Schneller Abbruch: Gibt es überhaupt einen direkten Nachbarn der Unknown ist?
+  if (!isNeighborUnknown(voxel)) return false;
+
+  int unknown_count = 0;
+  // Nur 3x3x3 Box checken (27 Voxel) - Extrem viel schneller als 5x5x5!
+  for (int x = -1; x <= 1; ++x) {
+    for (int y = -1; y <= 1; ++y) {
+      for (int z = -1; z <= 1; ++z) {
+        Eigen::Vector3i nbr = voxel + Eigen::Vector3i(x, y, z);
+        
+        if (!inmap(nbr) || grid_map_->isUnknown(nbr)) {
+          unknown_count++;
+        }
+      }
+    }
+  }
+
+  // Ein Lidar-Loch hat meist nur 1-4 "Unknown" Voxel in seiner Nähe.
+  // Ein echter unentdeckter Raum hat massiv viele.
+  // Wir verlangen, dass mindestens 8 Voxel im Umkreis "Unknown" sind.
+  return unknown_count >= 8; 
 }
 
 }  // namespace fast_planner
