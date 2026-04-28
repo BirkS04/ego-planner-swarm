@@ -194,30 +194,41 @@ namespace ego_planner
     planNextWaypoint(wps_[wp_id_]);
   }
 
-  void EGOReplanFSM::planNextWaypoint(const Eigen::Vector3d next_wp)
+void EGOReplanFSM::planNextWaypoint(const Eigen::Vector3d next_wp)
   {
+    RCLCPP_INFO(node_->get_logger(), "[DEBUG-TRACE] 2. In planNextWaypoint()");
+    
     bool success = false;
+    RCLCPP_INFO(node_->get_logger(), "[DEBUG-TRACE] 2a. Starte planGlobalTraj() - A* Pathfinding...");
+    
     success = planner_manager_->planGlobalTraj(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), next_wp, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+
+    RCLCPP_INFO(node_->get_logger(), "[DEBUG-TRACE] 2b. planGlobalTraj() beendet. Success: %d", success);
 
     if (success)
     {
       end_pt_ = next_wp;
-
       constexpr double step_size_t = 0.1;
       int i_end = floor(planner_manager_->global_data_.global_duration_ / step_size_t);
+      
+      RCLCPP_INFO(node_->get_logger(), "[DEBUG-TRACE] 2c. Evaluiere Trajektorie. Array-Groesse (i_end): %d", i_end);
+
       vector<Eigen::Vector3d> gloabl_traj(i_end);
       for (int i = 0; i < i_end; i++)
       {
         gloabl_traj[i] = planner_manager_->global_data_.global_traj_.evaluate(i * step_size_t);
       }
 
+      RCLCPP_INFO(node_->get_logger(), "[DEBUG-TRACE] 2d. Global Traj Array aufgebaut.");
+
       end_vel_.setZero();
       have_target_ = true;
       have_new_target_ = true;
 
-      /*** FSM状态转换 ***/
-      if (exec_state_ == WAIT_TARGET)
+      if (exec_state_ == WAIT_TARGET) {
+        RCLCPP_INFO(node_->get_logger(), "[DEBUG-TRACE] 2e. Wechsle State auf GEN_NEW_TRAJ");
         changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
+      }
       else
       {
         while (exec_state_ != EXEC_TRAJ)
@@ -229,6 +240,7 @@ namespace ego_planner
       }
 
       visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0);
+      RCLCPP_INFO(node_->get_logger(), "[DEBUG-TRACE] 2f. planNextWaypoint erfolgreich abgeschlossen.");
     }
     else
     {
@@ -236,6 +248,7 @@ namespace ego_planner
     }
   }
 
+  
   void EGOReplanFSM::triggerCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg)
   {
     have_trigger_ = true;
@@ -243,20 +256,38 @@ namespace ego_planner
     init_pt_ = odom_pos_;
   }
 
-  void EGOReplanFSM::waypointCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg)
+void EGOReplanFSM::waypointCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg)
   {
-    if (msg->pose.position.z < -0.1)
-      return;
+    if (msg->pose.position.z < -0.1) return;
 
-    cout << "Triggered!" << endl;
+    // 1. SCHUTZ VOR DEM FRONTEND/MAP BUG
+    // Wenn die Nachricht im "map" Frame kommt und Millionen-Werte hat, ignorieren wir sie!
+    if (msg->header.frame_id == "map" && abs(msg->pose.position.x) > 10000.0) {
+        RCLCPP_WARN(node_->get_logger(), "Falscher Frame (map) mit globalen Koordinaten ignoriert.");
+        return;
+    }
+
+    // 2. SCHUTZ VOR RAM-CRASH (Distanz)
+    double dx = msg->pose.position.x - odom_pos_(0);
+    double dy = msg->pose.position.y - odom_pos_(1);
+    double dist = sqrt(dx*dx + dy*dy);
+    if (dist > 500.0) {
+        RCLCPP_ERROR(node_->get_logger(), "SCHUTZ: Ziel ist %.2f Meter entfernt! Ignoriert.", dist);
+        return;
+    }
 
     init_pt_ = odom_pos_;
 
-    Eigen::Vector3d end_wp(msg->pose.position.x, msg->pose.position.y, 1.0);
+    // 3. HÖHE VOM FRONTEND ÜBERNEHMEN! (statt hart auf 1.0)
+    double target_z = msg->pose.position.z;
+    if (target_z < 0.5) target_z = 1.0; // Fallback, falls jemand Z=0 schickt
 
+    RCLCPP_INFO(node_->get_logger(), "EgoPlanner plant zu Frontend-Ziel: X=%.2f, Y=%.2f, Z=%.2f", 
+                msg->pose.position.x, msg->pose.position.y, target_z);
+
+    Eigen::Vector3d end_wp(msg->pose.position.x, msg->pose.position.y, target_z);
     planNextWaypoint(end_wp);
   }
-
   void EGOReplanFSM::odometryCallback(const std::shared_ptr<const nav_msgs::msg::Odometry> &msg)
   {
     odom_pos_(0) = msg->pose.pose.position.x;
@@ -593,6 +624,18 @@ namespace ego_planner
       double t_cur = (time_now - info->start_time_).seconds();
       t_cur = std::min(info->duration_, t_cur);
 
+            // --- HOVER SCHUTZ (Verhindert bad_alloc durch Micro-Replans) ---
+      double dist_to_end = (odom_pos_ - end_pt_).norm();
+      if (dist_to_end < 0.25 && t_cur > info->duration_ - 0.5) {
+          if (target_type_ != TARGET_TYPE::EXPLORATION_TARGET) {
+              have_target_ = false;
+              have_trigger_ = false;
+              changeFSMExecState(WAIT_TARGET, "GOAL_REACHED");
+              goto force_return;
+          }
+      }
+      // ---------------------------------------------------------------
+
       Eigen::Vector3d pos = info->position_traj_.evaluateDeBoorT(t_cur);
 
       /* && (end_pt_ - pos).norm() < 0.5 */
@@ -702,29 +745,30 @@ bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) // zx-todo
   }
   // === DEBUGGING ENDE ===
 
-  start_pt_ = odom_pos_;
-  start_vel_ = odom_vel_;
-  start_acc_.setZero();
-
-  bool flag_random_poly_init;
-  if (timesOfConsecutiveStateCalls().first == 1)
-    flag_random_poly_init = false;
-  else
-    flag_random_poly_init = true;
-
-  for (int i = 0; i < trial_times; i++)
-  {
-    RCLCPP_INFO(node_->get_logger(), "Versuche callReboundReplan (Versuch %d)...", i);
+  RCLCPP_INFO(node_->get_logger(), "[DEBUG-TRACE] 3. In planFromGlobalTraj()");
     
-    // Hier passierte der Crash, weil er auf leere Daten zugegriffen hat
-    if (callReboundReplan(true, flag_random_poly_init))
+    start_pt_ = odom_pos_;
+    start_vel_ = odom_vel_;
+    start_acc_.setZero();
+
+    bool flag_random_poly_init;
+    if (timesOfConsecutiveStateCalls().first == 1)
+      flag_random_poly_init = false;
+    else
+      flag_random_poly_init = true;
+
+    for (int i = 0; i < trial_times; i++)
     {
-      RCLCPP_INFO(node_->get_logger(), "Erfolgreich geplant!");
-      return true;
+      RCLCPP_INFO(node_->get_logger(), "[DEBUG-TRACE] 3a. Rufe callReboundReplan auf (Versuch %d)...", i);
+      
+      if (callReboundReplan(true, flag_random_poly_init))
+      {
+        RCLCPP_INFO(node_->get_logger(), "[DEBUG-TRACE] 3b. callReboundReplan war ERFOLGREICH!");
+        return true;
+      }
     }
-  }
-  
-  RCLCPP_ERROR(node_->get_logger(), "Alle Versuche fehlgeschlagen.");
+    
+    RCLCPP_INFO(node_->get_logger(), "[DEBUG-TRACE] 3c. callReboundReplan fehlgeschlagen!");
   return false;
 }
   bool EGOReplanFSM::planFromCurrentTraj(const int trial_times /*=1*/)
